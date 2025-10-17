@@ -1,0 +1,51 @@
+{
+  "timestamp": "2025-10-05T14:00:35.076519",
+  "base_url": "https://crophealth-8.preview.emergentagent.com",
+  "tests_run": 7,
+  "tests_passed": 5,
+  "success_rate": 71.42857142857143,
+  "test_results": [
+    {
+      "test": "API Root Endpoint",
+      "success": true,
+      "details": "Status: 200, Response: {'message': 'Plant Disease Detection API'}",
+      "timestamp": "2025-10-05T14:00:26.865914"
+    },
+    {
+      "test": "POST Status Check",
+      "success": true,
+      "details": "POST Status: 200, Created ID: 225fbc54-ceed-455d-919b-800cfd8e33b8",
+      "timestamp": "2025-10-05T14:00:26.908441"
+    },
+    {
+      "test": "GET Status Checks",
+      "success": true,
+      "details": "GET Status: 200, Records count: 4",
+      "timestamp": "2025-10-05T14:00:26.946755"
+    },
+    {
+      "test": "AI Analysis Endpoint",
+      "success": false,
+      "details": "Status: 200, Error: Analysis failed: 500: Analysis failed: Failed to generate chat completion: litellm.BadRequestError: OpenAIException - litellm.BadRequestError: GeminiException BadRequestError - {\n  \"error\": {\n    \"code\": 400,\n    \"message\": \"Unable to process input image. Please retry or report in https://developers.generativeai.google/guide/troubleshooting\",\n    \"status\": \"INVALID_ARGUMENT\"\n  }\n}\n. Received Model Group=gemini/gemini-2.5-pro\nAvailable Model Group Fallbacks=None",
+      "timestamp": "2025-10-05T14:00:30.891226"
+    },
+    {
+      "test": "File Upload Analysis",
+      "success": false,
+      "details": "Status: 500, Error: {'detail': 'Analysis failed: Failed to generate chat completion: litellm.BadRequestError: OpenAIException - litellm.BadRequestError: GeminiException BadRequestError - {\\n  \"error\": {\\n    \"code\": 400,\\n    \"message\": \"Unable to process input image. Please retry or report in https://developers.generativeai.google/guide/troubleshooting\",\\n    \"status\": \"INVALID_ARGUMENT\"\\n  }\\n}\\n. Received Model Group=gemini/gemini-2.5-pro\\nAvailable Model Group Fallbacks=None'}",
+      "timestamp": "2025-10-05T14:00:34.939044"
+    },
+    {
+      "test": "Get Analyses History",
+      "success": true,
+      "details": "Status: 200, Analysis records: 11, Latest: Common Leaf Spot (Mycosphaerella fragariae)",
+      "timestamp": "2025-10-05T14:00:35.030088"
+    },
+    {
+      "test": "Error Handling - Invalid File Type",
+      "success": true,
+      "details": "Invalid file type test - Status: 400",
+      "timestamp": "2025-10-05T14:00:35.075825"
+    }
+  ]
+}
