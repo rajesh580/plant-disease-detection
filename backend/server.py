@@ -1,4 +1,5 @@
 from fastapi import FastAPI, APIRouter, File, UploadFile, HTTPException
+from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -11,10 +12,15 @@ import uuid
 from datetime import datetime, timezone
 import base64
 import asyncio
+import hashlib
+from io import BytesIO
 
 # Load environment variables
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
+
+# In-memory cache for TTS audio
+tts_cache = {}
 
 # MongoDB connection
 try:
@@ -59,11 +65,16 @@ class AnalysisResponse(BaseModel):
     analysis: Optional[DiseaseAnalysis] = None
     message: str = ""
 
+class TTSRequest(BaseModel):
+    text: str
+    language: str = "en"  # en, hi, kn, ta, te, mr, gu
+
 # Plant Disease Analysis Function
 async def analyze_plant_image(image_base64: str) -> DiseaseAnalysis:
     try:
         import google.generativeai as genai
         import base64
+        import json
         
         # Get API key
         api_key = os.environ.get('GOOGLE_API_KEY')
@@ -72,37 +83,67 @@ async def analyze_plant_image(image_base64: str) -> DiseaseAnalysis:
         
         # Configure the Gemini API
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('models/gemini-2.5-pro')
+        model = genai.GenerativeModel('models/gemini-2.0-flash')
         
-        # Convert base64 to image for Gemini
-        image = {
-            "mime_type": "image/jpeg",
-            "data": image_base64
+        # Decode base64 and detect image type
+        try:
+            image_bytes = base64.b64decode(image_base64)
+            logging.info(f"Image size: {len(image_bytes)} bytes")
+        except Exception as decode_err:
+            logging.error(f"Base64 decode error: {decode_err}")
+            raise HTTPException(status_code=400, detail="Invalid base64 image data")
+        
+        # Determine MIME type from first few bytes (magic number detection)
+        mime_type = "image/jpeg"  # default
+        if image_bytes.startswith(b'\x89PNG'):
+            mime_type = "image/png"
+        elif image_bytes.startswith(b'\xff\xd8\xff'):
+            mime_type = "image/jpeg"
+        elif image_bytes.startswith(b'GIF'):
+            mime_type = "image/gif"
+        elif image_bytes.startswith(b'RIFF') and b'WEBP' in image_bytes[:20]:
+            mime_type = "image/webp"
+        
+        logging.info(f"Detected MIME type: {mime_type}")
+        
+        # Validate image size
+        if len(image_bytes) < 100:
+            logging.error(f"Image too small: {len(image_bytes)} bytes. Canvas capture may have failed.")
+            raise HTTPException(status_code=400, detail=f"Image data too small ({len(image_bytes)} bytes). Ensure the camera is working and canvas capture completes.")
+        
+        # Prepare image for Gemini using the correct API
+        # genai.upload_file or direct binary with mime_type
+        image_part = {
+            "mime_type": mime_type,
+            "data": image_bytes
         }
         
         # Generate prompt
         prompt = """You are an expert plant pathologist. Analyze this plant image for diseases and provide a detailed analysis.
-        Format your response as JSON with:
-        {
-            "disease_name": "Disease name or Healthy",
-            "confidence": 0.0-1.0,
-            "severity": "Mild/Moderate/Severe/Healthy",
-            "symptoms": ["symptom1", "symptom2"],
-            "treatment": ["treatment1", "treatment2"],
-            "prevention": ["prevention1", "prevention2"]
-        }
-        Respond with ONLY the JSON, no other text."""
+Format your response as JSON with:
+{
+    "disease_name": "Disease name or Healthy",
+    "confidence": 0.0-1.0,
+    "severity": "Mild/Moderate/Severe/Healthy",
+    "symptoms": ["symptom1", "symptom2"],
+    "treatment": ["treatment1", "treatment2"],
+    "prevention": ["prevention1", "prevention2"]
+}
+Respond with ONLY the JSON, no other text."""
         
         # Generate response
-        response = await model.generate_content_async([prompt, image])
+        logging.info("Sending request to Gemini API...")
+        response = model.generate_content([prompt, image_part])
+        logging.info(f"Gemini response received: {response.text[:100]}")
         
         # Parse response
-        import json
         try:
             # Clean response if needed
             response_text = response.text.strip()
             if response_text.startswith("```json"):
                 response_text = response_text.replace("```json", "").replace("```", "").strip()
+            elif response_text.startswith("```"):
+                response_text = response_text.replace("```", "").strip()
             
             parsed = json.loads(response_text)
             
@@ -118,7 +159,8 @@ async def analyze_plant_image(image_base64: str) -> DiseaseAnalysis:
             
             return analysis
             
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as json_err:
+            logging.error(f"JSON parse error: {json_err}, response was: {response.text[:200]}")
             # Fallback parsing
             return DiseaseAnalysis(
                 disease_name="Analysis completed",
@@ -130,7 +172,10 @@ async def analyze_plant_image(image_base64: str) -> DiseaseAnalysis:
             )
             
     except Exception as e:
-        logging.error(f"Analysis error: {e}")
+        logging.error(f"Analysis error: {e}", exc_info=True)
+        # Handle rate limit (429) with friendly message
+        if "429" in str(e) or "Resource exhausted" in str(e):
+            raise HTTPException(status_code=429, detail="API rate limit reached. Please try again in a few minutes.")
         raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
 
 # Routes
@@ -227,6 +272,72 @@ async def analyze_uploaded_image(file: UploadFile = File(...)):
 async def get_analyses():
     analyses = await db.plant_analyses.find().sort("timestamp", -1).to_list(100)
     return [DiseaseAnalysis(**analysis) for analysis in analyses]
+
+@api_router.post("/tts")
+async def text_to_speech(request: TTSRequest):
+    """Convert text to speech with caching for speed"""
+    try:
+        # Language code mapping
+        language_map = {
+            'en': 'en',
+            'hi': 'hi',
+            'kn': 'kn',
+            'ta': 'ta',
+            'te': 'te',
+            'mr': 'mr',
+            'gu': 'gu',
+        }
+        
+        lang_code = language_map.get(request.language, 'en')
+        
+        # Create cache key from text and language
+        cache_key = hashlib.md5(f"{request.text}_{lang_code}".encode()).hexdigest()
+        
+        # Check cache first (instant return for repeated requests)
+        if cache_key in tts_cache:
+            logging.info(f"Serving TTS from cache for {lang_code}")
+            return StreamingResponse(
+                iter([tts_cache[cache_key]]),
+                media_type='audio/mpeg',
+                headers={'Content-Disposition': 'attachment; filename=speech.mp3'}
+            )
+        
+        # Generate using gTTS
+        try:
+            from gtts import gTTS
+            
+            # Generate with faster settings
+            tts = gTTS(text=request.text, lang=lang_code, slow=False, lang_check=False)
+            
+            # Save to bytes buffer
+            audio_buffer = BytesIO()
+            tts.write_to_fp(audio_buffer)
+            audio_data = audio_buffer.getvalue()
+            
+            # Cache the result
+            tts_cache[cache_key] = audio_data
+            # Limit cache to 50 most recent items
+            if len(tts_cache) > 50:
+                oldest_key = next(iter(tts_cache))
+                del tts_cache[oldest_key]
+            
+            logging.info(f"Generated TTS for {lang_code}, cache size: {len(tts_cache)}")
+            
+            return StreamingResponse(
+                iter([audio_data]),
+                media_type='audio/mpeg',
+                headers={'Content-Disposition': 'attachment; filename=speech.mp3'}
+            )
+            
+        except Exception as e:
+            logging.error(f"gTTS error for language {lang_code}: {e}")
+            raise HTTPException(status_code=500, detail=f"TTS generation failed: {str(e)}")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logging.error(f"TTS error: {e}")
+        raise HTTPException(status_code=500, detail=f"TTS generation failed: {str(e)}")
 
 # Include the router in the main app
 app.include_router(api_router)

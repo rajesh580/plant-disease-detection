@@ -28,6 +28,16 @@ The Plant Disease Detection System is an advanced, AI-powered full-stack applica
 - 📱 **Responsive Design** works on all devices
 - 🔄 **Real-time Updates** with WebSocket support
 - 📦 **MongoDB Integration** for result storage
+- 🔊 **Multi-Language Text-to-Speech** - Hear analysis in 7 Indian languages:
+  - 🇺🇸 English
+  - 🇮🇳 Hindi (हिन्दी)
+  - 🇮🇳 Kannada (ಕನ್ನಡ)
+  - 🇮🇳 Tamil (தமிழ்)
+  - 🇮🇳 Telugu (తెలుగు)
+  - 🇮🇳 Marathi (मराठी)
+  - 🇮🇳 Gujarati (ગુજરાતી)
+- ⚡ **Optimized TTS with Caching** - Instant speech playback on repeated requests
+- 🌍 **Multi-Language Output** - Get complete analysis results in 7 languages with instant translation
 
 ## 🛠️ Tech Stack
 
@@ -36,12 +46,16 @@ The Plant Disease Detection System is an advanced, AI-powered full-stack applica
 - 🎨 **TailwindCSS** - Styling
 - 🎯 **Shadcn/ui** - Component Library
 - 📱 **Responsive Design** - Mobile-first approach
+- 🔊 **Web Speech API** - Native speech synthesis for English
+- 🌐 **gTTS Integration** - Google Text-to-Speech for Indian languages
 
 ### Backend
 - ⚡ **FastAPI** - Python web framework
 - 🍃 **MongoDB** - Database
 - 🤖 **Google Gemini AI** - AI/ML capabilities
 - 🔐 **JWT Authentication** - Security
+- 🔊 **gTTS** - Text-to-Speech with in-memory caching
+- ⚙️ **AbortController** - Request cancellation for concurrent TTS prevention
 
 ## Installation Guide
 
@@ -492,7 +506,101 @@ Before installing the Plant Disease Detection System, ensure your system meets t
    ```bash
    # Install Certbot
    sudo apt install certbot python3-certbot-nginx
-   sudo certbot --nginx -d yourdomain.com
+      sudo certbot --nginx -d yourdomain.com
+   ```
+
+## 📊 API Usage & Limits
+
+### Rate Limits
+- ⏱️ **Requests**: 2 per minute (free tier)
+- 📁 **File Size**: Maximum 10MB
+- 🖼️ **Formats**: JPG, PNG
+- 📝 **Response Time**: ~2-3 seconds
+
+### Endpoints
+- `POST /api/analyze-upload` - Upload and analyze images
+  - Response: Disease analysis with treatment recommendations
+  - Supports: JPG, PNG (max 10MB)
+- `POST /api/translate` - Translate analysis to target language
+  - Request: `{ "text": "analysis text", "source_lang": "en", "target_lang": "hi|kn|ta|te|mr|gu" }`
+  - Response: Translated analysis text
+  - Uses MyMemory Translation API for instant translations
+- `POST /api/tts` - Generate speech audio for disease analysis
+  - Request: `{ "text": "analysis text", "language": "en|hi|kn|ta|te|mr|gu" }`
+  - Response: MP3 audio blob with speech synthesis
+  - Performance: First request ~2-3s, cached requests <500ms
+- `GET /api/status` - System health check
+- `POST /api/status` - Create status records
+- `GET /api/analyses` - Retrieve analysis history
+
+## 💡 Usage Guide
+
+### Basic Image Analysis
+1. **Access Application**
+   - Open http://localhost:3000 in your browser
+   - Ensure backend is running on port 4000
+
+2. **Image Analysis**
+   - Upload image or use camera
+   - Wait for AI processing (~2-3 seconds)
+   - View detailed analysis results
+
+3. **Results Include**
+   - Disease identification
+   - Confidence percentage
+   - Severity assessment
+   - Treatment recommendations
+   - Preventive measures
+   - **Available in 7 Languages**: English, Hindi, Kannada, Tamil, Telugu, Marathi, Gujarati
+
+### Multi-Language Support
+**The system provides complete analysis in multiple languages:**
+- 🇺🇸 **English** - Default analysis language
+- 🇮🇳 **Hindi (हिन्दी)** - Instant translation via MyMemory API
+- 🇮🇳 **Kannada (ಕನ್ನಡ)** - Full disease analysis and recommendations
+- 🇮🇳 **Tamil (தமிழ்)** - Treatment guidelines in Tamil
+- 🇮🇳 **Telugu (తెలుగు)** - Preventive measures in Telugu
+- 🇮🇳 **Marathi (मराठी)** - Complete localized results
+- 🇮🇳 **Gujarati (ગુજરાતી)** - All analysis sections translated
+
+**How to Use:**
+1. Upload and analyze an image
+2. Select desired language from dropdown
+3. View complete analysis translated to selected language
+4. Click speaker icon to hear results in that language
+5. Supports instant switching between languages without re-analyzing
+
+### Multi-Language Text-to-Speech
+1. **Select Language**
+   - Choose from 7 supported languages in the language dropdown
+   - Languages are shown with native script (e.g., हिन्दी for Hindi)
+
+2. **Generate Speech**
+   - Click the 🔊 speaker button
+   - Button shows loading spinner while generating (first time: 2-3s)
+   - **Note**: Cached requests are instant (< 500ms)
+
+3. **Control Playback**
+   - Button changes to red ⏹️ during playback
+   - Click to stop speech immediately
+   - Changing language automatically stops current speech
+
+4. **Performance Tips**
+   - First speech generation takes 2-3 seconds (gTTS API call)
+   - Repeated speech in same language is instant (in-memory cache)
+   - English uses native browser speech (no backend call needed)
+   - Cache is maintained per session (browser reload clears cache)
+   - Check browser console (F12) for performance metrics: `TTS generation took: Xms (cached|generated)`
+
+### Troubleshooting Speech
+| Issue | Solution |
+|-------|----------|
+| No sound | Check volume, ensure speaker is connected |
+| Very slow speech | First request uses API, repeated requests cached and fast (~300ms) |
+| Multiple voices playing | Language changed mid-speech - click red STOP button |
+| TTS error message | Backend may be offline, check `http://localhost:4000/api/status` |
+| Language not supported | Verify language code in backend logs, supported: en, hi, kn, ta, te, mr, gu |
+| Backend log errors | Check `backend/logs/app.log` for detailed error information |
    ```
 
 ## �📊 API Usage & Limits

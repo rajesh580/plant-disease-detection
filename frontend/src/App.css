@@ -108,6 +108,7 @@ video {
 /* Card glass effect */
 .glass-card {
   background: rgba(255, 255, 255, 0.9);
+  -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
   border: 1px solid rgba(255, 255, 255, 0.2);
 }
@@ -170,6 +171,59 @@ video {
   animation-delay: 0.3s;
 }
 
+/* Language Select Styling */
+.language-select {
+  appearance: none;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23059669' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3e%3cpolyline points='6 9 12 15 18 9'%3e%3c/polyline%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 0.5rem center;
+  background-size: 1.5em 1.5em;
+  padding-right: 2.5rem;
+  transition: all 0.3s ease;
+}
+
+.language-select:hover {
+  box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.1);
+  background-color: rgba(5, 150, 105, 0.02);
+}
+
+.language-select:focus {
+  box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.2);
+  outline: none;
+}
+
+/* Speech Button Styling */
+.speech-button {
+  transition: all 0.3s ease;
+  border-width: 2px;
+  border-color: #d1d5db;
+  font-weight: 600;
+}
+
+.speech-button:hover {
+  border-color: #059669;
+  box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.1);
+}
+
+.speech-button:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.2);
+}
+
+/* Speaking animation */
+@keyframes pulse-speak {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+.speech-button.speaking {
+  animation: pulse-speak 1s infinite;
+}
+
 /* Responsive design */
 @media (max-width: 768px) {
   .container {
@@ -200,13 +254,6 @@ input:focus,
 .focus\\:outline-none:focus {
   outline: 2px solid #059669;
   outline-offset: 2px;
-}
-
-/* Custom progress bar */
-.progress-bar {
-  background: linear-gradient(90deg, #059669 0%, #10b981 100%);
-  border-radius: 9999px;
-  height: 0.5rem;
 }
 
 /* Toast animations */

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import './App.css';
 import { Button } from './components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from './components/ui/card';
@@ -7,7 +7,7 @@ import { Separator } from './components/ui/separator';
 import { Progress } from './components/ui/progress';
 import { Alert, AlertDescription } from './components/ui/alert';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/ui/tabs';
-import { Upload, Camera, Leaf, AlertCircle, CheckCircle, TrendingUp, Shield, Zap } from 'lucide-react';
+import { Upload, Camera, Leaf, AlertCircle, CheckCircle, TrendingUp, Shield, Zap, Volume2, VolumeX } from 'lucide-react';
 import { Toaster } from './components/ui/sonner';
 import { toast } from 'sonner';
 
@@ -22,10 +22,29 @@ function App() {
   const [showCamera, setShowCamera] = useState(false);
   const [cameraStream, setCameraStream] = useState(null);
   const [isCapturing, setIsCapturing] = useState(false);
+  const [cameraError, setCameraError] = useState(null);
+  const [selectedLanguage, setSelectedLanguage] = useState('en');
+  const [translatedResult, setTranslatedResult] = useState(null);
+  const [isTranslating, setIsTranslating] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isLoadingSpeech, setIsLoadingSpeech] = useState(false);
   
   const fileInputRef = useRef(null);
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
+  const utteranceRef = useRef(null);
+  const ttsControllerRef = useRef(null);  // AbortController for TTS requests
+
+  // Language options
+  const LANGUAGES = {
+    en: 'English',
+    hi: 'हिन्दी (Hindi)',
+    kn: 'ಕನ್ನಡ (Kannada)',
+    ta: 'தமிழ் (Tamil)',
+    te: 'తెలుగు (Telugu)',
+    mr: 'मराठी (Marathi)',
+    gu: 'ગુજરાતી (Gujarati)',
+  };
 
   // Hero section with gradient background
   const HeroSection = () => (
@@ -113,15 +132,87 @@ function App() {
   // Start camera
   const startCamera = useCallback(async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-      setCameraStream(stream);
-      setShowCamera(true);
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        toast.error('Camera API not supported in this browser');
+        console.error('Camera API not supported:', navigator.mediaDevices);
+        return;
       }
+      
+      // Request permission and get stream
+      console.log('Requesting camera access...');
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      console.log('Stream obtained:', stream);
+      
+      // Update state to show camera (this renders the video element)
+      setShowCamera(true);
+      setCameraStream(stream);
+      setCameraError(null);
+      
+      // Wait a tick for React to render the video element
+      setTimeout(async () => {
+        // Try to get video element from ref OR by ID (fallback)
+        const videoElement = videoRef.current || document.getElementById('camera-video-element');
+        console.log('Video element lookup:', { refExists: !!videoRef.current, idExists: !!document.getElementById('camera-video-element'), final: !!videoElement });
+        
+        if (!videoElement) {
+          console.error('Video element not found via ref or ID!');
+          setCameraError('Video element not found in DOM');
+          toast.error('Video element not found in DOM');
+          return;
+        }
+        
+        try {
+          console.log('Attaching stream to video element...');
+          videoElement.srcObject = stream;
+          console.log('Stream attached. Video element now has srcObject:', !!videoElement.srcObject);
+          
+          // Wait a bit for metadata to load, then force play
+          const maxAttempts = 5;
+          let attempts = 0;
+          
+          const tryPlay = async () => {
+            attempts++;
+            console.log(`Play attempt ${attempts}/${maxAttempts}`);
+            
+            if (videoElement?.videoWidth > 0) {
+              console.log('Video metadata loaded:', { width: videoElement.videoWidth, height: videoElement.videoHeight });
+              try {
+                await videoElement.play();
+                console.log('Video play() succeeded!');
+                toast.success('Video playing!');
+              } catch (playErr) {
+                console.warn('Play attempt failed:', playErr.name, playErr.message);
+                if (attempts < maxAttempts) {
+                  setTimeout(tryPlay, 200);
+                } else {
+                  setCameraError(`Play failed after ${maxAttempts} attempts: ${playErr.message}`);
+                  toast.error(`Play failed: ${playErr.message}`);
+                }
+              }
+            } else if (attempts < maxAttempts) {
+              console.log('Metadata not ready, retrying...');
+              setTimeout(tryPlay, 200);
+            } else {
+              setCameraError('Video metadata failed to load');
+              toast.error('Video metadata failed to load');
+            }
+          };
+          
+          setTimeout(tryPlay, 100);
+          
+        } catch (assignErr) {
+          console.error('Failed to assign stream to video element:', assignErr);
+          setCameraError(`Assign error: ${assignErr.message}`);
+          toast.error(`Assignment failed: ${assignErr.message}`);
+        }
+      }, 50);
+      
       toast.success('Camera activated!');
     } catch (error) {
-      toast.error('Camera access denied or not available');
+      const errName = error?.name || 'CameraError';
+      const errMsg = error?.message || '';
+      setCameraError(`${errName}: ${errMsg}`);
+      toast.error(`${errName}: ${errMsg}`);
       console.error('Camera error:', error);
     }
   }, []);
@@ -133,9 +224,270 @@ function App() {
       setCameraStream(null);
     }
     setShowCamera(false);
+    setCameraError(null);
   }, [cameraStream]);
 
-  // Capture photo from camera
+  // Stop any ongoing speech
+  const stopSpeech = useCallback(() => {
+    // Abort any pending TTS request
+    if (ttsControllerRef.current) {
+      ttsControllerRef.current.abort();
+      ttsControllerRef.current = null;
+    }
+
+    if (utteranceRef.current) {
+      if (utteranceRef.current instanceof Audio) {
+        utteranceRef.current.pause();
+        utteranceRef.current.currentTime = 0;
+      } else {
+        window.speechSynthesis.cancel();
+      }
+    }
+    setIsSpeaking(false);
+    setIsLoadingSpeech(false);
+  }, []);
+
+  // Translate analysis results
+  const translateResults = useCallback(async (targetLanguage) => {
+    // Stop any ongoing speech when language changes
+    stopSpeech();
+
+    if (!analysisResult || targetLanguage === 'en') {
+      setTranslatedResult(null);
+      setSelectedLanguage(targetLanguage);
+      return;
+    }
+
+    setIsTranslating(true);
+    try {
+      const translated = {
+        disease_name: await translateText(analysisResult.disease_name, targetLanguage),
+        severity: await translateText(analysisResult.severity, targetLanguage),
+        symptoms: await Promise.all(
+          (analysisResult.symptoms || []).map(s => translateText(s, targetLanguage))
+        ),
+        treatment: await Promise.all(
+          (analysisResult.treatment || []).map(t => translateText(t, targetLanguage))
+        ),
+        prevention: await Promise.all(
+          (analysisResult.prevention || []).map(p => translateText(p, targetLanguage))
+        ),
+        confidence: analysisResult.confidence
+      };
+
+      setTranslatedResult(translated);
+      setSelectedLanguage(targetLanguage);
+      toast.success(`Translated to ${LANGUAGES[targetLanguage]}`);
+    } catch (error) {
+      console.error('Translation error:', error);
+      toast.error('Translation failed. Showing original text.');
+      setTranslatedResult(null);
+    } finally {
+      setIsTranslating(false);
+    }
+  }, [analysisResult, stopSpeech]);
+
+  // Helper function to translate text
+  const translateText = async (text, targetLanguage) => {
+    try {
+      const response = await fetch(
+        `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=en|${targetLanguage}`
+      );
+      const data = await response.json();
+      return data.responseData?.translatedText || text;
+    } catch (error) {
+      console.warn('Translation fallback for:', text, error);
+      return text;
+    }
+  };
+
+  // Text-to-speech function
+  const speakAnalysisResult = useCallback(async () => {
+    if (!analysisResult) {
+      toast.error('No analysis results to speak');
+      return;
+    }
+
+    // If already speaking, stop it
+    if (isSpeaking) {
+      if (utteranceRef.current) {
+        if (utteranceRef.current instanceof Audio) {
+          utteranceRef.current.pause();
+          utteranceRef.current.currentTime = 0;
+        } else {
+          window.speechSynthesis.cancel();
+        }
+      }
+      setIsSpeaking(false);
+      return;
+    }
+
+    try {
+      setIsLoadingSpeech(true);
+      
+      // Use translated result if available and not English, otherwise use original
+      const resultToSpeak = (selectedLanguage !== 'en' && translatedResult) 
+        ? translatedResult 
+        : analysisResult;
+      
+      // Build the text to speak
+      const textToSpeak = `Plant Disease: ${resultToSpeak.disease_name}. Severity: ${resultToSpeak.severity}. Confidence: ${Math.round(resultToSpeak.confidence * 100)} percent. Symptoms Detected: ${resultToSpeak.symptoms?.join(', ') || 'None'}. Treatment Recommendations: ${resultToSpeak.treatment?.join(', ') || 'None'}. Prevention Tips: ${resultToSpeak.prevention?.join(', ') || 'None'}.`;
+
+      // Language code mapping
+      const languageMap = {
+        en: 'en-US',
+        hi: 'hi-IN',
+        kn: 'kn-IN',
+        ta: 'ta-IN',
+        te: 'te-IN',
+        mr: 'mr-IN',
+        gu: 'gu-IN',
+      };
+      
+      // For non-English languages, use backend TTS (with caching)
+      if (selectedLanguage !== 'en') {
+        try {
+          toast.loading('Generating speech...');
+          
+          // Create a new AbortController for this request
+          const controller = new AbortController();
+          ttsControllerRef.current = controller;
+          
+          const startTime = performance.now();
+          
+          const response = await fetch(`${API}/tts`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              text: textToSpeak,
+              language: selectedLanguage
+            }),
+            signal: controller.signal
+          });
+
+          if (!response.ok) {
+            throw new Error('TTS service error');
+          }
+
+          const generationTime = performance.now() - startTime;
+          console.log(`TTS generation took: ${generationTime.toFixed(0)}ms ${generationTime < 500 ? '(cached)' : '(generated)'}`);
+
+          const audioBlob = await response.blob();
+          const audioUrl = URL.createObjectURL(audioBlob);
+          const audio = new Audio(audioUrl);
+
+          audio.onplay = () => {
+            setIsLoadingSpeech(false);
+            setIsSpeaking(true);
+            toast.success(`Speaking in ${LANGUAGES[selectedLanguage]}...`);
+          };
+
+          audio.onended = () => {
+            setIsSpeaking(false);
+            URL.revokeObjectURL(audioUrl);
+            ttsControllerRef.current = null;
+          };
+
+          audio.onerror = () => {
+            setIsSpeaking(false);
+            setIsLoadingSpeech(false);
+            URL.revokeObjectURL(audioUrl);
+            toast.error('Failed to play audio');
+            ttsControllerRef.current = null;
+          };
+
+          utteranceRef.current = audio;
+          await audio.play();
+          return;
+        } catch (error) {
+          if (error.name === 'AbortError') {
+            console.log('TTS request aborted');
+            setIsLoadingSpeech(false);
+            return;
+          }
+          console.error('Backend TTS error:', error);
+          toast.error('Backend TTS unavailable, trying browser speech...');
+          // Fall through to browser speech synthesis
+        }
+      }
+
+      // Use browser Speech Synthesis for English or as fallback
+      const synth = window.speechSynthesis;
+      
+      // Cancel any previous speech
+      synth.cancel();
+
+      const utterance = new SpeechSynthesisUtterance(textToSpeak);
+      
+      utterance.lang = languageMap[selectedLanguage] || 'en-US';
+      utterance.rate = 1.0;
+      utterance.pitch = 1.0;
+      utterance.volume = 1.0;
+
+      utterance.onstart = () => {
+        setIsLoadingSpeech(false);
+        setIsSpeaking(true);
+        toast.success(`Speaking in ${LANGUAGES[selectedLanguage]}...`);
+      };
+
+      utterance.onend = () => {
+        setIsSpeaking(false);
+      };
+
+      utterance.onerror = (event) => {
+        setIsSpeaking(false);
+        setIsLoadingSpeech(false);
+        toast.error(`Speech error: ${event.error}`);
+      };
+
+      utteranceRef.current = utterance;
+      
+      // Wait for voices to be loaded
+      const attemptSpeak = () => {
+        const voices = synth.getVoices();
+        
+        if (voices.length > 0) {
+          // Try to find a voice for the selected language
+          const targetLang = languageMap[selectedLanguage];
+          const matchingVoice = voices.find(v => v.lang.startsWith(targetLang.split('-')[0]));
+          
+          if (matchingVoice) {
+            utterance.voice = matchingVoice;
+          }
+          
+          synth.speak(utterance);
+        } else {
+          // Voices not loaded yet, retry
+          setTimeout(attemptSpeak, 100);
+        }
+      };
+      
+      attemptSpeak();
+    } catch (error) {
+      setIsSpeaking(false);
+      setIsLoadingSpeech(false);
+      toast.error(`Speech error: ${error.message}`);
+      console.error('Speech error:', error);
+    }
+  }, [analysisResult, translatedResult, selectedLanguage, isSpeaking, LANGUAGES, API]);
+
+  // Wrapper function to handle speak with translation
+  const handleSpeak = useCallback(() => {
+    // If user selected a language other than English and no translation exists, translate first
+    if (selectedLanguage !== 'en' && !translatedResult && !isTranslating) {
+      toast.info(`Translating to ${LANGUAGES[selectedLanguage]}...`);
+      // Translate and speak will be triggered when translatedResult updates (via effect)
+      translateResults(selectedLanguage);
+    } else {
+      speakAnalysisResult();
+    }
+  }, [selectedLanguage, translatedResult, isTranslating, LANGUAGES, translateResults, speakAnalysisResult]);
+
+  // NOTE: removed automatic speaking when the language changes.
+  // Speech will now only start when the user explicitly clicks the Speak button.
+
   const capturePhoto = useCallback(() => {
     if (videoRef.current && canvasRef.current) {
       setIsCapturing(true);
@@ -143,18 +495,45 @@ function App() {
       const canvas = canvasRef.current;
       const context = canvas.getContext('2d');
       
+      // Check if video is ready
+      if (video.videoWidth === 0 || video.videoHeight === 0) {
+        toast.error('Video not ready. Wait a moment and try again.');
+        setIsCapturing(false);
+        console.warn('Video dimensions are 0:', { videoWidth: video.videoWidth, videoHeight: video.videoHeight });
+        return;
+      }
+      
+      console.log('Capturing from video:', { videoWidth: video.videoWidth, videoHeight: video.videoHeight });
+      
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
       context.drawImage(video, 0, 0);
       
+      // Ensure we got valid canvas data
+      const canvasDataUrl = canvas.toDataURL();
+      if (!canvasDataUrl || canvasDataUrl.length < 100) {
+        toast.error('Canvas capture failed. Camera may not be working.');
+        setIsCapturing(false);
+        console.error('Invalid canvas data:', canvasDataUrl.length);
+        return;
+      }
+      
       canvas.toBlob((blob) => {
+        if (!blob || blob.size === 0) {
+          toast.error('Canvas blob is empty. Camera may not be working.');
+          setIsCapturing(false);
+          console.error('Canvas blob is empty or null');
+          return;
+        }
+        
+        console.log('Blob captured:', { size: blob.size, type: blob.type });
         const file = new File([blob], 'camera-capture.jpg', { type: 'image/jpeg' });
         setSelectedImage(file);
-        setImagePreview(canvas.toDataURL());
+        setImagePreview(canvasDataUrl);
         stopCamera();
         setIsCapturing(false);
         toast.success('Photo captured successfully!');
-      }, 'image/jpeg');
+      }, 'image/jpeg', 0.95);
     }
   }, [stopCamera]);
 
@@ -283,13 +662,59 @@ function App() {
                         </Button>
                       ) : (
                         <div className="space-y-4">
-                          <video 
-                            ref={videoRef} 
-                            autoPlay 
-                            playsInline 
-                            className="w-full rounded-lg"
-                            data-testid="camera-video"
-                          />
+                          <div className="bg-gray-900 rounded-lg overflow-hidden">
+                            <video 
+                              id="camera-video-element"
+                              ref={videoRef} 
+                              autoPlay 
+                              muted
+                              playsInline 
+                              className="w-full rounded-lg bg-black"
+                              style={{ display: 'block' }}
+                              data-testid="camera-video"
+                              onLoadedMetadata={() => {
+                                console.log('Video metadata loaded:', { width: videoRef.current?.videoWidth, height: videoRef.current?.videoHeight });
+                                if (videoRef.current) {
+                                  videoRef.current.play().catch(e => console.warn('Play on metadata failed:', e));
+                                }
+                              }}
+                              onCanPlay={() => console.log('Video can play')}
+                              onPlay={() => console.log('Video playing')}
+                            />
+                          </div>
+                          {cameraError && (
+                            <div className="mt-2 text-sm text-red-600 bg-red-50 p-2 rounded" data-testid="camera-error">
+                              <strong>Error:</strong> {cameraError}
+                            </div>
+                          )}
+                          <div className="mt-2 text-xs text-gray-600 bg-gray-100 p-2 rounded">
+                            <div>Stream: {cameraStream ? '✓ Active' : '✗ None'}</div>
+                            <div>Video: {videoRef.current?.srcObject ? '✓ Attached' : '✗ No source'}</div>
+                            <div>Playing: {videoRef.current && !videoRef.current.paused ? '✓ Yes' : '✗ Paused'}</div>
+                            <div>Resolution: {videoRef.current?.videoWidth}x{videoRef.current?.videoHeight}</div>
+                          </div>
+                          <div className="mt-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const v = videoRef.current;
+                                const info = {
+                                  exists: !!v,
+                                  paused: v?.paused,
+                                  readyState: v?.readyState,
+                                  videoWidth: v?.videoWidth,
+                                  videoHeight: v?.videoHeight,
+                                  srcObject: !!v?.srcObject,
+                                  tracks: v?.srcObject?.getTracks?.().map(t => ({kind: t.kind, readyState: t.readyState})) || []
+                                };
+                                console.log('Video element state:', info);
+                                toast.info(`Video state: paused=${v?.paused}, res=${v?.videoWidth}x${v?.videoHeight}`);
+                              }}
+                              className="text-xs text-blue-600 underline"
+                            >
+                              Log video state to console
+                            </button>
+                          </div>
                           <div className="flex gap-4">
                             <Button 
                               onClick={capturePhoto} 
@@ -299,6 +724,17 @@ function App() {
                             >
                               <Camera className="w-4 h-4 mr-2" />
                               {isCapturing ? 'Capturing...' : 'Capture Photo'}
+                            </Button>
+                            <Button 
+                              onClick={() => {
+                                if (videoRef.current) {
+                                  videoRef.current.play().then(() => console.log('Manual play succeeded')).catch(e => console.error('Manual play failed:', e));
+                                }
+                              }} 
+                              variant="outline"
+                              className="flex-1"
+                            >
+                              Force Play
                             </Button>
                             <Button 
                               onClick={stopCamera} 
@@ -347,10 +783,54 @@ function App() {
               {/* Results Section */}
               <Card className="shadow-xl border-0">
                 <CardHeader>
-                  <CardTitle className="text-2xl text-gray-900 flex items-center">
-                    <TrendingUp className="w-6 h-6 mr-2 text-emerald-600" />
-                    Analysis Results
-                  </CardTitle>
+                  <div className="flex items-center justify-between gap-4">
+                    <CardTitle className="text-2xl text-gray-900 flex items-center">
+                      <TrendingUp className="w-6 h-6 mr-2 text-emerald-600" />
+                      Analysis Results
+                    </CardTitle>
+                    {analysisResult && (
+                      <div className="flex items-center gap-3">
+                        <select 
+                          value={selectedLanguage}
+                          onChange={(e) => translateResults(e.target.value)}
+                          disabled={isTranslating}
+                          className="language-select px-4 py-2 border-2 border-emerald-300 rounded-lg text-sm bg-white hover:bg-emerald-50 hover:border-emerald-400 disabled:opacity-50 font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                        >
+                          {Object.entries(LANGUAGES).map(([code, name]) => (
+                            <option key={code} value={code}>{name}</option>
+                          ))}
+                        </select>
+                        {isLoadingSpeech || isSpeaking ? (
+                          <Button
+                            onClick={stopSpeech}
+                            variant="default"
+                            className="speech-button px-3 py-2 bg-red-600 text-white hover:bg-red-700 transition-all duration-200"
+                            title="Stop"
+                          >
+                            {isLoadingSpeech ? (
+                              <>
+                                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                              </>
+                            ) : (
+                              <>
+                                <VolumeX className="w-4 h-4" />
+                              </>
+                            )}
+                          </Button>
+                        ) : (
+                          <Button
+                            onClick={handleSpeak}
+                            disabled={isTranslating || !analysisResult}
+                            variant="outline"
+                            className="speech-button px-3 py-2 hover:bg-emerald-50 hover:border-emerald-400 transition-all duration-200"
+                            title="Speak analysis results"
+                          >
+                            <Volume2 className="w-4 h-4" />
+                          </Button>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </CardHeader>
                 <CardContent>
                   {!analysisResult ? (
@@ -364,10 +844,10 @@ function App() {
                       <div className="bg-gray-50 rounded-lg p-6">
                         <div className="flex items-center justify-between mb-4">
                           <h3 className="text-xl font-semibold text-gray-900" data-testid="disease-name">
-                            {analysisResult.disease_name}
+                            {translatedResult ? translatedResult.disease_name : analysisResult.disease_name}
                           </h3>
-                          <Badge className={getSeverityColor(analysisResult.severity)} data-testid="severity-badge">
-                            {analysisResult.severity}
+                          <Badge className={getSeverityColor(translatedResult ? translatedResult.severity : analysisResult.severity)} data-testid="severity-badge">
+                            {translatedResult ? translatedResult.severity : analysisResult.severity}
                           </Badge>
                         </div>
                         
@@ -376,12 +856,12 @@ function App() {
                             <p className="text-sm font-medium text-gray-700 mb-1">Confidence Level</p>
                             <div className="flex items-center space-x-3">
                               <Progress 
-                                value={analysisResult.confidence * 100} 
+                                value={(translatedResult?.confidence || analysisResult.confidence) * 100} 
                                 className="flex-1" 
                                 data-testid="confidence-progress"
                               />
-                              <span className={`font-semibold ${getConfidenceColor(analysisResult.confidence)}`}>
-                                {Math.round(analysisResult.confidence * 100)}%
+                              <span className={`font-semibold ${getConfidenceColor(translatedResult?.confidence || analysisResult.confidence)}`}>
+                                {Math.round((translatedResult?.confidence || analysisResult.confidence) * 100)}%
                               </span>
                             </div>
                           </div>
@@ -391,14 +871,14 @@ function App() {
                       <Separator />
 
                       {/* Symptoms */}
-                      {analysisResult.symptoms && analysisResult.symptoms.length > 0 && (
+                      {(translatedResult?.symptoms || analysisResult.symptoms)?.length > 0 && (
                         <div>
                           <h4 className="text-lg font-semibold text-gray-900 mb-3 flex items-center">
                             <AlertCircle className="w-5 h-5 mr-2 text-amber-600" />
-                            Symptoms Detected
+                            {selectedLanguage === 'en' ? 'Symptoms Detected' : translatedResult ? 'लक्षण' : 'Symptoms Detected'}
                           </h4>
                           <div className="space-y-2" data-testid="symptoms-list">
-                            {analysisResult.symptoms.map((symptom, index) => (
+                            {(translatedResult?.symptoms || analysisResult.symptoms).map((symptom, index) => (
                               <div key={index} className="flex items-start space-x-2">
                                 <div className="w-2 h-2 bg-amber-500 rounded-full mt-2 flex-shrink-0"></div>
                                 <p className="text-gray-700">{symptom}</p>
@@ -411,14 +891,14 @@ function App() {
                       <Separator />
 
                       {/* Treatment */}
-                      {analysisResult.treatment && analysisResult.treatment.length > 0 && (
+                      {(translatedResult?.treatment || analysisResult.treatment)?.length > 0 && (
                         <div>
                           <h4 className="text-lg font-semibold text-gray-900 mb-3 flex items-center">
                             <CheckCircle className="w-5 h-5 mr-2 text-green-600" />
-                            Treatment Recommendations
+                            {selectedLanguage === 'en' ? 'Treatment Recommendations' : translatedResult ? 'उपचार' : 'Treatment Recommendations'}
                           </h4>
                           <div className="space-y-2" data-testid="treatment-list">
-                            {analysisResult.treatment.map((treatment, index) => (
+                            {(translatedResult?.treatment || analysisResult.treatment).map((treatment, index) => (
                               <div key={index} className="flex items-start space-x-2">
                                 <div className="w-2 h-2 bg-green-500 rounded-full mt-2 flex-shrink-0"></div>
                                 <p className="text-gray-700">{treatment}</p>
@@ -431,14 +911,14 @@ function App() {
                       <Separator />
 
                       {/* Prevention */}
-                      {analysisResult.prevention && analysisResult.prevention.length > 0 && (
+                      {(translatedResult?.prevention || analysisResult.prevention)?.length > 0 && (
                         <div>
                           <h4 className="text-lg font-semibold text-gray-900 mb-3 flex items-center">
                             <Shield className="w-5 h-5 mr-2 text-blue-600" />
-                            Prevention Tips
+                            {selectedLanguage === 'en' ? 'Prevention Tips' : translatedResult ? 'रोकथाम' : 'Prevention Tips'}
                           </h4>
                           <div className="space-y-2" data-testid="prevention-list">
-                            {analysisResult.prevention.map((tip, index) => (
+                            {(translatedResult?.prevention || analysisResult.prevention).map((tip, index) => (
                               <div key={index} className="flex items-start space-x-2">
                                 <div className="w-2 h-2 bg-blue-500 rounded-full mt-2 flex-shrink-0"></div>
                                 <p className="text-gray-700">{tip}</p>
