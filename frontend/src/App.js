@@ -46,6 +46,46 @@ function App() {
     gu: 'ગુજરાતી (Gujarati)',
   };
 
+  // Heading translations
+  const HEADING_TRANSLATIONS = {
+    'Symptoms Detected': {
+      en: 'Symptoms Detected',
+      hi: 'लक्षण',
+      kn: 'ಗುರುತಿಸಿದ ಲಕ್ಷಣಗಳು',
+      ta: 'கண்டறிந்த அறிகுறிகள்',
+      te: 'గుర్తించిన లక్షణాలు',
+      mr: 'लक्षण',
+      gu: 'શોધાયેલ લક્ષણો'
+    },
+    'Treatment Recommendations': {
+      en: 'Treatment Recommendations',
+      hi: 'उपचार',
+      kn: 'ಚಿಕಿತ್ಸೆ ಶಿಫಾರಸುಗಳು',
+      ta: 'சிகிச்சை பரிந்துரைகள்',
+      te: 'చికిత్స సిఫారసులు',
+      mr: 'उपचार',
+      gu: 'ઉપચાર ભલામણો'
+    },
+    'Prevention Tips': {
+      en: 'Prevention Tips',
+      hi: 'रोकथाम',
+      kn: 'প্রতিরোধ ಸಲಹೆಗಳು',
+      ta: 'தடுப்பு ஆலோசனைகள்',
+      te: 'నివారణ చిట్కాలు',
+      mr: 'रोकथाम',
+      gu: 'નિવારણ ટિપ્સ'
+    },
+    'Confidence Level': {
+      en: 'Confidence Level',
+      hi: 'आत्मविश्वास स्तर',
+      kn: 'ವಿಶ್ವಾಸದ ಮಟ್ಟ',
+      ta: 'நம்பிக்கை நிலை',
+      te: 'విశ్వాస స్థితి',
+      mr: 'आत्मविश्वास स्तर',
+      gu: 'આત્મવિશ્વાસ સ્તર'
+    }
+  };
+
   // Hero section with gradient background
   const HeroSection = () => (
     <div className="relative min-h-screen bg-gradient-to-br from-emerald-50 via-white to-teal-50 overflow-hidden">
@@ -330,8 +370,11 @@ function App() {
         ? translatedResult 
         : analysisResult;
       
-      // Build the text to speak
-      const textToSpeak = `Plant Disease: ${resultToSpeak.disease_name}. Severity: ${resultToSpeak.severity}. Confidence: ${Math.round(resultToSpeak.confidence * 100)} percent. Symptoms Detected: ${resultToSpeak.symptoms?.join(', ') || 'None'}. Treatment Recommendations: ${resultToSpeak.treatment?.join(', ') || 'None'}. Prevention Tips: ${resultToSpeak.prevention?.join(', ') || 'None'}.`;
+      // Get translated headings
+      const getHeading = (key) => HEADING_TRANSLATIONS[key]?.[selectedLanguage] || HEADING_TRANSLATIONS[key]?.['en'] || key;
+      
+      // Build the text to speak with translated headings
+      const textToSpeak = `${resultToSpeak.disease_name}. ${getHeading('Confidence Level')}: ${Math.round(resultToSpeak.confidence * 100)} percent. ${getHeading('Symptoms Detected')}: ${resultToSpeak.symptoms?.join(', ') || 'None'}. ${getHeading('Treatment Recommendations')}: ${resultToSpeak.treatment?.join(', ') || 'None'}. ${getHeading('Prevention Tips')}: ${resultToSpeak.prevention?.join(', ') || 'None'}.`;
 
       // Language code mapping
       const languageMap = {
@@ -853,7 +896,9 @@ function App() {
                         
                         <div className="space-y-3">
                           <div>
-                            <p className="text-sm font-medium text-gray-700 mb-1">Confidence Level</p>
+                            <p className="text-sm font-medium text-gray-700 mb-1">
+                              {HEADING_TRANSLATIONS['Confidence Level']?.[selectedLanguage] || HEADING_TRANSLATIONS['Confidence Level']?.['en']}
+                            </p>
                             <div className="flex items-center space-x-3">
                               <Progress 
                                 value={(translatedResult?.confidence || analysisResult.confidence) * 100} 
@@ -875,7 +920,7 @@ function App() {
                         <div>
                           <h4 className="text-lg font-semibold text-gray-900 mb-3 flex items-center">
                             <AlertCircle className="w-5 h-5 mr-2 text-amber-600" />
-                            {selectedLanguage === 'en' ? 'Symptoms Detected' : translatedResult ? 'लक्षण' : 'Symptoms Detected'}
+                            {HEADING_TRANSLATIONS['Symptoms Detected']?.[selectedLanguage] || HEADING_TRANSLATIONS['Symptoms Detected']?.['en']}
                           </h4>
                           <div className="space-y-2" data-testid="symptoms-list">
                             {(translatedResult?.symptoms || analysisResult.symptoms).map((symptom, index) => (
@@ -895,7 +940,7 @@ function App() {
                         <div>
                           <h4 className="text-lg font-semibold text-gray-900 mb-3 flex items-center">
                             <CheckCircle className="w-5 h-5 mr-2 text-green-600" />
-                            {selectedLanguage === 'en' ? 'Treatment Recommendations' : translatedResult ? 'उपचार' : 'Treatment Recommendations'}
+                            {HEADING_TRANSLATIONS['Treatment Recommendations']?.[selectedLanguage] || HEADING_TRANSLATIONS['Treatment Recommendations']?.['en']}
                           </h4>
                           <div className="space-y-2" data-testid="treatment-list">
                             {(translatedResult?.treatment || analysisResult.treatment).map((treatment, index) => (
@@ -915,7 +960,7 @@ function App() {
                         <div>
                           <h4 className="text-lg font-semibold text-gray-900 mb-3 flex items-center">
                             <Shield className="w-5 h-5 mr-2 text-blue-600" />
-                            {selectedLanguage === 'en' ? 'Prevention Tips' : translatedResult ? 'रोकथाम' : 'Prevention Tips'}
+                            {HEADING_TRANSLATIONS['Prevention Tips']?.[selectedLanguage] || HEADING_TRANSLATIONS['Prevention Tips']?.['en']}
                           </h4>
                           <div className="space-y-2" data-testid="prevention-list">
                             {(translatedResult?.prevention || analysisResult.prevention).map((tip, index) => (
