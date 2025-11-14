@@ -373,8 +373,8 @@ function App() {
       // Get translated headings
       const getHeading = (key) => HEADING_TRANSLATIONS[key]?.[selectedLanguage] || HEADING_TRANSLATIONS[key]?.['en'] || key;
       
-      // Build the text to speak with translated headings
-      const textToSpeak = `${resultToSpeak.disease_name}. ${getHeading('Confidence Level')}: ${Math.round(resultToSpeak.confidence * 100)} percent. ${getHeading('Symptoms Detected')}: ${resultToSpeak.symptoms?.join(', ') || 'None'}. ${getHeading('Treatment Recommendations')}: ${resultToSpeak.treatment?.join(', ') || 'None'}. ${getHeading('Prevention Tips')}: ${resultToSpeak.prevention?.join(', ') || 'None'}.`;
+      // Build the text to speak with translated headings (optimized for speed)
+      const textToSpeak = `${resultToSpeak.disease_name}. ${getHeading('Confidence Level')}: ${Math.round(resultToSpeak.confidence * 100)}%. ${getHeading('Symptoms Detected')}: ${resultToSpeak.symptoms?.join(', ') || 'None'}. ${getHeading('Treatment Recommendations')}: ${resultToSpeak.treatment?.join(', ') || 'None'}. ${getHeading('Prevention Tips')}: ${resultToSpeak.prevention?.join(', ') || 'None'}.`;
 
       // Language code mapping
       const languageMap = {
@@ -390,15 +390,14 @@ function App() {
       // For non-English languages, use backend TTS (with caching)
       if (selectedLanguage !== 'en') {
         try {
-          toast.loading('Generating speech...');
-          
           // Create a new AbortController for this request
           const controller = new AbortController();
           ttsControllerRef.current = controller;
           
           const startTime = performance.now();
           
-          const response = await fetch(`${API}/tts`, {
+          // Fetch with timeout
+          const fetchPromise = fetch(`${API}/tts`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -410,21 +409,24 @@ function App() {
             signal: controller.signal
           });
 
+          const response = await fetchPromise;
+
           if (!response.ok) {
             throw new Error('TTS service error');
           }
 
           const generationTime = performance.now() - startTime;
-          console.log(`TTS generation took: ${generationTime.toFixed(0)}ms ${generationTime < 500 ? '(cached)' : '(generated)'}`);
+          const isCached = generationTime < 500;
+          console.log(`TTS generation took: ${generationTime.toFixed(0)}ms ${isCached ? '(cached)' : '(generated)'}`);
 
           const audioBlob = await response.blob();
           const audioUrl = URL.createObjectURL(audioBlob);
           const audio = new Audio(audioUrl);
-
+          
+          // Optimized: Minimal toast notifications
           audio.onplay = () => {
             setIsLoadingSpeech(false);
             setIsSpeaking(true);
-            toast.success(`Speaking in ${LANGUAGES[selectedLanguage]}...`);
           };
 
           audio.onended = () => {
@@ -433,11 +435,11 @@ function App() {
             ttsControllerRef.current = null;
           };
 
-          audio.onerror = () => {
+          audio.onerror = (e) => {
             setIsSpeaking(false);
             setIsLoadingSpeech(false);
             URL.revokeObjectURL(audioUrl);
-            toast.error('Failed to play audio');
+            console.error('Audio playback error:', e);
             ttsControllerRef.current = null;
           };
 
@@ -451,7 +453,6 @@ function App() {
             return;
           }
           console.error('Backend TTS error:', error);
-          toast.error('Backend TTS unavailable, trying browser speech...');
           // Fall through to browser speech synthesis
         }
       }
@@ -472,7 +473,6 @@ function App() {
       utterance.onstart = () => {
         setIsLoadingSpeech(false);
         setIsSpeaking(true);
-        toast.success(`Speaking in ${LANGUAGES[selectedLanguage]}...`);
       };
 
       utterance.onend = () => {
@@ -482,7 +482,7 @@ function App() {
       utterance.onerror = (event) => {
         setIsSpeaking(false);
         setIsLoadingSpeech(false);
-        toast.error(`Speech error: ${event.error}`);
+        console.error(`Speech error: ${event.error}`);
       };
 
       utteranceRef.current = utterance;

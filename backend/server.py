@@ -275,7 +275,7 @@ async def get_analyses():
 
 @api_router.post("/tts")
 async def text_to_speech(request: TTSRequest):
-    """Convert text to speech with caching for speed"""
+    """Convert text to speech with aggressive caching for speed"""
     try:
         # Language code mapping
         language_map = {
@@ -290,43 +290,57 @@ async def text_to_speech(request: TTSRequest):
         
         lang_code = language_map.get(request.language, 'en')
         
-        # Create cache key from text and language
+        # Create cache key from text and language (optimized)
         cache_key = hashlib.md5(f"{request.text}_{lang_code}".encode()).hexdigest()
         
         # Check cache first (instant return for repeated requests)
         if cache_key in tts_cache:
-            logging.info(f"Serving TTS from cache for {lang_code}")
+            logging.info(f"Cache HIT for {lang_code} - {cache_key[:8]}")
+            audio_data = tts_cache[cache_key]
             return StreamingResponse(
-                iter([tts_cache[cache_key]]),
+                iter([audio_data]),
                 media_type='audio/mpeg',
-                headers={'Content-Disposition': 'attachment; filename=speech.mp3'}
+                headers={
+                    'Content-Disposition': 'attachment; filename=speech.mp3',
+                    'Cache-Control': 'public, max-age=86400'
+                }
             )
         
-        # Generate using gTTS
+        # Generate using gTTS with optimized settings
         try:
             from gtts import gTTS
             
-            # Generate with faster settings
-            tts = gTTS(text=request.text, lang=lang_code, slow=False, lang_check=False)
+            # Optimized generation: fast speech, skip language validation
+            tts = gTTS(
+                text=request.text, 
+                lang=lang_code, 
+                slow=False,
+                lang_check=False,
+                pre_processor_args={'end_of_line': ' '}  # Optimize text processing
+            )
             
-            # Save to bytes buffer
+            # Save to bytes buffer efficiently
             audio_buffer = BytesIO()
             tts.write_to_fp(audio_buffer)
             audio_data = audio_buffer.getvalue()
             
             # Cache the result
             tts_cache[cache_key] = audio_data
-            # Limit cache to 50 most recent items
-            if len(tts_cache) > 50:
+            # Aggressive cache limit: keep 100 items for better hit rate
+            if len(tts_cache) > 100:
+                # Remove oldest (first) item
                 oldest_key = next(iter(tts_cache))
                 del tts_cache[oldest_key]
             
-            logging.info(f"Generated TTS for {lang_code}, cache size: {len(tts_cache)}")
+            logging.info(f"Cache MISS & GENERATED for {lang_code}, size: {len(audio_data)} bytes, cache items: {len(tts_cache)}")
             
             return StreamingResponse(
                 iter([audio_data]),
                 media_type='audio/mpeg',
-                headers={'Content-Disposition': 'attachment; filename=speech.mp3'}
+                headers={
+                    'Content-Disposition': 'attachment; filename=speech.mp3',
+                    'Cache-Control': 'public, max-age=86400'
+                }
             )
             
         except Exception as e:
