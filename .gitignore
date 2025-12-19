@@ -37,7 +37,7 @@ htmlcov/
 .vscode/
 .idea/
 *.sublime-*
-
+backend/run.bat
 # Misc
 .DS_Store
 .env.local
