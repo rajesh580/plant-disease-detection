@@ -69,7 +69,7 @@ function App() {
     'Prevention Tips': {
       en: 'Prevention Tips',
       hi: 'रोकथाम',
-      kn: 'প্রতিরোধ ಸಲಹೆಗಳು',
+      kn: 'ತಡೆಗಟ್ಟುವ ಸಲಹೆಗಳು',
       ta: 'தடுப்பு ஆலோசனைகள்',
       te: 'నివారణ చిట్కాలు',
       mr: 'रोकथाम',
@@ -300,21 +300,44 @@ function App() {
 
     setIsTranslating(true);
     try {
+      console.log(`[Translation] Starting translation to ${targetLanguage}`);
+      
+      // Translate each field separately to ensure consistency
+      const disease_name = await translateText(analysisResult.disease_name, targetLanguage);
+      const severity = await translateText(analysisResult.severity, targetLanguage);
+      
+      // Translate symptoms array - sequential to prevent mixing
+      const symptoms = [];
+      for (const s of (analysisResult.symptoms || [])) {
+        const translated = await translateText(s, targetLanguage);
+        symptoms.push(translated);
+      }
+      
+      // Translate treatment array - sequential to prevent mixing
+      const treatment = [];
+      for (const t of (analysisResult.treatment || [])) {
+        const translated = await translateText(t, targetLanguage);
+        treatment.push(translated);
+      }
+      
+      // Translate prevention array - sequential to prevent mixing
+      const prevention = [];
+      for (const p of (analysisResult.prevention || [])) {
+        const translated = await translateText(p, targetLanguage);
+        prevention.push(translated);
+      }
+
       const translated = {
-        disease_name: await translateText(analysisResult.disease_name, targetLanguage),
-        severity: await translateText(analysisResult.severity, targetLanguage),
-        symptoms: await Promise.all(
-          (analysisResult.symptoms || []).map(s => translateText(s, targetLanguage))
-        ),
-        treatment: await Promise.all(
-          (analysisResult.treatment || []).map(t => translateText(t, targetLanguage))
-        ),
-        prevention: await Promise.all(
-          (analysisResult.prevention || []).map(p => translateText(p, targetLanguage))
-        ),
+        disease_name,
+        severity,
+        symptoms,
+        treatment,
+        prevention,
         confidence: analysisResult.confidence
       };
 
+      console.log(`[Translation] Completed for ${targetLanguage}:`, translated);
+      
       setTranslatedResult(translated);
       setSelectedLanguage(targetLanguage);
       toast.success(`Translated to ${LANGUAGES[targetLanguage]}`);
@@ -327,16 +350,45 @@ function App() {
     }
   }, [analysisResult, stopSpeech]);
 
-  // Helper function to translate text
+  // Helper function to translate text with better error handling
   const translateText = async (text, targetLanguage) => {
     try {
+      // Skip translation for very short text or empty
+      if (!text || text.trim().length === 0) {
+        return text;
+      }
+
       const response = await fetch(
-        `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=en|${targetLanguage}`
+        `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=en|${targetLanguage}&cb=${Date.now()}`,
+        { cache: 'no-store' }
       );
+      
+      if (!response.ok) {
+        return text;
+      }
+      
       const data = await response.json();
-      return data.responseData?.translatedText || text;
+      
+      // Get translated text
+      let translatedText = data.responseData?.translatedText || text;
+      
+      // Validate translation quality
+      if (!translatedText || translatedText.trim().length === 0) {
+        return text;
+      }
+      
+      // Remove any HTML entities that might have been added
+      translatedText = translatedText
+        .replace(/&quot;/g, '"')
+        .replace(/&apos;/g, "'")
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&amp;/g, '&')
+        .trim();
+      
+      return translatedText;
     } catch (error) {
-      console.warn('Translation fallback for:', text, error);
+      console.warn('Translation error for:', text, error);
       return text;
     }
   };

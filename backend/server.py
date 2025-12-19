@@ -83,7 +83,7 @@ async def analyze_plant_image(image_base64: str) -> DiseaseAnalysis:
         
         # Configure the Gemini API
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('models/gemini-2.0-flash')
+        model = genai.GenerativeModel('models/gemini-2.5-flash')
         
         # Decode base64 and detect image type
         try:
@@ -315,8 +315,7 @@ async def text_to_speech(request: TTSRequest):
                 text=request.text, 
                 lang=lang_code, 
                 slow=False,
-                lang_check=False,
-                pre_processor_args={'end_of_line': ' '}  # Optimize text processing
+                lang_check=False
             )
             
             # Save to bytes buffer efficiently
