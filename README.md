@@ -2,6 +2,7 @@
 
 <div align="center">
 
+
 ![Plant Disease Detection](https://img.shields.io/badge/AI-Plant%20Disease%20Detection-brightgreen)
 ![Version](https://img.shields.io/badge/version-1.0.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
